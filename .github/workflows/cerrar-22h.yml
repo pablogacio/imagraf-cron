@@ -1,46 +1,42 @@
 name: Cerrar intervenciones 22h
+
 on:
   schedule:
-    - cron: '0 21 * * *'  # 21 UTC = 22h España peninsular
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
 jobs:
   cerrar:
     runs-on: ubuntu-latest
     steps:
       - name: Cerrar intervenciones abiertas
-        uses: actions/github-script@v7
-        env:
-          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        with:
-          script: |
-            const { initializeApp, cert } = require('@firebase/app-compat') || 
-              (() => { throw new Error('need admin') })();
-        continue-on-error: true
-
-      - name: Run Node script
         run: |
           npm install firebase-admin
           node -e "
           const admin = require('firebase-admin');
-          admin.initializeApp({ credential: admin.credential.cert(JSON.parse(process.env.SERVICE_ACCOUNT)) });
+          const sa = JSON.parse(process.env.SERVICE_ACCOUNT);
+          admin.initializeApp({ credential: admin.credential.cert(sa) });
           const db = admin.firestore();
-          db.collection('registros').where('estado','==','abierta').get().then(snap => {
-            if(snap.empty){ console.log('Sin intervenciones abiertas'); return; }
-            const batch = db.batch();
-            const now = admin.firestore.Timestamp.now();
-            snap.docs.forEach(doc => {
-              const d = doc.data();
-              const started = d.fechaInicio ? d.fechaInicio.toDate() : new Date();
-              const mins = (Date.now() - started.getTime()) / 60000;
-              batch.update(doc.ref, {
-                estado: 'cerrada',
-                fechaFin: now,
-                duracionMinutos: Math.round(mins * 10) / 10,
-                notas: (d.notas||'') + ' [Cerrada automáticamente a las 22:00]'
+          db.collection('registros').where('estado','==','abierta').get()
+            .then(snap => {
+              if(snap.empty){ console.log('Sin intervenciones abiertas'); process.exit(0); }
+              const batch = db.batch();
+              const now = admin.firestore.Timestamp.now();
+              snap.docs.forEach(doc => {
+                const d = doc.data();
+                const started = d.fechaInicio ? d.fechaInicio.toDate() : new Date();
+                const mins = (Date.now() - started.getTime()) / 60000;
+                batch.update(doc.ref, {
+                  estado: 'cerrada',
+                  fechaFin: now,
+                  duracionMinutos: Math.round(mins * 10) / 10,
+                  notas: (d.notas||'') + ' [Cerrada automáticamente a las 22:00]'
+                });
               });
-            });
-            return batch.commit();
-          }).then(() => { console.log('Listo'); process.exit(0); })
-          .catch(e => { console.error(e); process.exit(1); });
+              return batch.commit();
+            })
+            .then(() => { console.log('Listo'); process.exit(0); })
+            .catch(e => { console.error(e); process.exit(1); });
           "
         env:
           SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
