@@ -1,0 +1,25 @@
+const admin = require('firebase-admin');
+const sa = JSON.parse(process.env.SERVICE_ACCOUNT);
+admin.initializeApp({ credential: admin.credential.cert(sa) });
+const db = admin.firestore();
+
+db.collection('registros').where('estado','==','abierta').get()
+  .then(snap => {
+    if(snap.empty){ console.log('Sin intervenciones abiertas'); process.exit(0); }
+    const batch = db.batch();
+    const now = admin.firestore.Timestamp.now();
+    snap.docs.forEach(doc => {
+      const d = doc.data();
+      const started = d.fechaInicio ? d.fechaInicio.toDate() : new Date();
+      const mins = (Date.now() - started.getTime()) / 60000;
+      batch.update(doc.ref, {
+        estado: 'cerrada',
+        fechaFin: now,
+        duracionMinutos: Math.round(mins * 10) / 10,
+        notas: (d.notas||'') + ' [Cerrada automáticamente a las 22:00]'
+      });
+    });
+    return batch.commit();
+  })
+  .then(() => { console.log('Listo'); process.exit(0); })
+  .catch(e => { console.error(e); process.exit(1); });
